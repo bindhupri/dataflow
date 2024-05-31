@@ -1,0 +1,178 @@
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
+from apache_beam.io.gcp.bigquery import ReadFromBigQuery
+from apache_beam.io.gcp.bigquery_tools import parse_table_schema_from_json
+from datetime import date
+import json
+
+class CustomOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument('--output_path', required=True, help='Path to write output data')
+
+def create_items_field(row):
+    item_schema = {
+        'itemId': row['itemId'],
+        'productId': row['productId'],
+        'itemType': 'DiscountedItem',
+        'productItemMappingStatus': row['productItemMappingStatus']
+    }
+    row['items'] = [item_schema]
+    return row
+
+def create_club_overrides_field(row):
+    club_overrides_schema = {
+        'clubNumber': 0,
+        'clubStartDate': '',
+        'clubEndDate': ''
+    }
+    row['clubOverrides'] = [club_overrides_schema]
+    return row
+
+def format_clearance_item(row):
+    return {
+        'startDate': row['effectivedate'],
+        'endDate': row['expirationdate'],
+        'basePrice': row['originalamount'],
+        'discountValue': row['discountedamount'],
+        'itemId': row['itemnbr'],
+        'clubs': [int(row['clubnbr'])],
+        'timeZone': 'UTC',
+        'savingsId': f"{row['clubnbr']}{row['itemnbr']}",
+        'savingsType': 'Clearance',
+        'applicableChannels': [],
+        'discountType': 'AMOUNT_OFF',
+        'eventTag': 0,
+        'members': [],
+        'items': "abc,DiscountedItem,xyz",
+        'clubOverrides': ",,",
+        'productId': None
+    }
+
+def join_cdp_items(kv):
+    key, groups = kv
+    clearance_items = groups['clearance']
+    cdp_items = groups['cdp']
+    for clearance_item in clearance_items:
+        clearance_item['productId'] = cdp_items[0]['PROD_ID'] if cdp_items else None
+    return clearance_items
+
+def join_with_product_count(kv):
+    key, groups = kv
+    clearance_items = groups['clearance']
+    product_count = groups['product_count'][0] if groups['product_count'] else 0
+    for clearance_item in clearance_items:
+        clearance_item['ProductCount'] = product_count
+        clearance_item['productItemMappingStatus'] = (
+            '1-to-multiple' if product_count > 1
+            else 'missing' if clearance_item['productId'] is None
+            else 'normal'
+        )
+        clearance_item['productId'] = clearance_item['productId'] if clearance_item['productId'] is not None else ''
+    return clearance_items
+
+def run(argv=None):
+    options = PipelineOptions(argv)
+    custom_options = options.view_as(CustomOptions)
+    custom_options.view_as(StandardOptions).runner = 'DirectRunner'
+
+    query_clearance_items = """
+    SELECT t2.effectivedate, t2.expirationdate, t1.retailamount as originalamount, 
+           t1.retailamount - t2.retailamount as discountedamount, 
+           t1.itemnbr, t1.clubnbr
+    FROM `your_project.your_dataset.insurance` t1
+    JOIN `your_project.your_dataset.insurance2` t2
+    ON t1.itemnbr = t2.itemnbr
+    WHERE t1.retailtype = 'BP'
+    """
+
+    query_cdp_items = """
+    SELECT t1.PROD_ID, t1.ITEM_NBR 
+    FROM `your_project.your_dataset.Financetable1` t1
+    JOIN `your_project.your_dataset.Financetable2` t2
+    ON t1.PROD_ID = t2.PROD_ID
+    WHERE t2.PROD_STATUS_CD = 'ACTIVE'
+    """
+
+    with beam.Pipeline(options=options) as p:
+        # Read clearance items
+        clearance_items_metadata = (p 
+                                    | 'Read Clearance Items' >> beam.io.ReadFromBigQuery(query=query_clearance_items, use_standard_sql=True)
+                                    | 'Format Clearance Items' >> beam.Map(format_clearance_item)
+        )
+        
+        # Read CDP items
+        cdp_items_list = (p 
+                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True)
+                          | 'Extract Key' >> beam.Map(lambda row: (row['ITEM_NBR'], row))
+        )
+
+        # Count distinct products for each item
+        cdp_items_list_grouped = (cdp_items_list 
+                                  | 'Group by Item ID' >> beam.GroupByKey()
+                                  | 'Count Distinct Products' >> beam.Map(lambda kv: (kv[0], len(set(item['PROD_ID'] for item in kv[1]))))
+        )
+
+        # Join clearance items with CDP items
+        joined_clearance_items = ({'clearance': clearance_items_metadata, 'cdp': cdp_items_list}
+                                  | 'CoGroupByKey' >> beam.CoGroupByKey()
+                                  | 'Join Clearance and CDP Items' >> beam.FlatMap(join_cdp_items)
+        )
+
+        # Join clearance items with grouped CDP items
+        clearance_items_with_product_count = (joined_clearance_items
+                                              | 'Extract Item ID' >> beam.Map(lambda row: (row['itemId'], row))
+                                              | 'Join with Grouped CDP Items' >> beam.CoGroupByKey()
+                                              | 'Join with Product Count' >> beam.FlatMap(join_with_product_count)
+        )
+
+        # Final processing
+        final_clearance_items = (clearance_items_with_product_count
+                                 | 'Create Items Field' >> beam.Map(create_items_field)
+                                 | 'Create Club Overrides Field' >> beam.Map(create_club_overrides_field)
+        )
+
+        # Write to Parquet on local drive (C: drive)
+        output_path = custom_options.output_path
+        final_clearance_items | 'Write to Parquet' >> beam.io.WriteToParquet(
+            file_path_prefix=os.path.join(output_path, str(date.today())),
+            file_name_suffix='.parquet',
+            schema=clearance_items_metadata_schema()
+        )
+
+def clearance_items_metadata_schema():
+    schema_str = json.dumps({
+        "fields": [
+            {"name": "startDate", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "endDate", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "basePrice", "type": "FLOAT", "mode": "NULLABLE"},
+            {"name": "discountValue", "type": "FLOAT", "mode": "NULLABLE"},
+            {"name": "timeZone", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "savingsId", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "savingsType", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "applicableChannels", "type": "STRING", "mode": "REPEATED"},
+            {"name": "discountType", "type": "STRING", "mode": "NULLABLE"},
+            {"name": "eventTag", "type": "INTEGER", "mode": "NULLABLE"},
+            {"name": "members", "type": "STRING", "mode": "REPEATED"},
+            {"name": "items", "type": "RECORD", "mode": "REPEATED", "fields": [
+                {"name": "itemId", "type": "STRING", "mode": "NULLABLE"},
+                {"name": "productId", "type": "STRING", "mode": "NULLABLE"},
+                {"name": "itemType", "type": "STRING", "mode": "NULLABLE"},
+                {"name": "productItemMappingStatus", "type": "STRING", "mode": "NULLABLE"}
+            ]},
+            {"name": "clubOverrides", "type": "RECORD", "mode": "REPEATED", "fields": [
+                {"name": "clubNumber", "type": "INTEGER", "mode": "NULLABLE"},
+                {"name": "clubStartDate", "type": "STRING", "mode": "NULLABLE"},
+                {"name": "clubEndDate", "type": "STRING", "mode": "NULLABLE"}
+            ]},
+            {"name": "clubs", "type": "INTEGER", "mode": "REPEATED"}
+        ]
+    })
+    return parse_table_schema_from_json(schema_str)
+
+if __name__ == '__main__':
+    import sys
+    argv = [
+        '--output_path', 'C:\\output\\path'
+    ]
+    run(argv)
