@@ -6,7 +6,6 @@ from apache_beam.io.parquetio import WriteToParquet
 from datetime import date
 import json
 from apache_beam.io.parquetio import WriteToParquet
-from apache_beam.io.parquetio import parquet_schema
 from datetime import date
 import pyarrow as pa
 
@@ -15,6 +14,7 @@ class CustomOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
         parser.add_argument('--output_path', required=True, help='Path to write output data')
+        #parser.add_argument('--project', required=True, help='GCP project ID')
 
 def format_clearance_item(row):
     return {
@@ -79,13 +79,13 @@ def run(argv=None):
     with beam.Pipeline(options=options) as p:
         # Read clearance items
         clearance_items_metadata = (p 
-                                    | 'Read Clearance Items' >> beam.io.ReadFromBigQuery(query=query_clearance_items, use_standard_sql=True)
+                                    | 'Read Clearance Items' >> beam.io.ReadFromBigQuery(query=query_clearance_items, use_standard_sql=True, project='dev-sams-data-generator')
                                     | 'Format Clearance Items' >> beam.Map(format_clearance_item)
         )
 
         # Read CDP items
         cdp_items_list = (p 
-                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True)
+                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True, project='dev-sams-data-generator')
                           | 'Extract Key' >> beam.Map(lambda row: (row['ITEM_NBR'], row))
         )
 
