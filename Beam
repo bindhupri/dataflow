@@ -49,16 +49,16 @@ def format_clearance_item(row):
         'productId': None
     }
 
-def join_cdp_items(kv):
-    key, groups = kv
+def join_cdp_items(element):
+    item, groups = element
     clearance_items = groups['clearance']
     cdp_items = groups['cdp']
     for clearance_item in clearance_items:
         clearance_item['productId'] = cdp_items[0]['PROD_ID'] if cdp_items else None
-    return clearance_items
+        yield clearance_item
 
-def join_with_product_count(kv):
-    key, groups = kv
+def join_with_product_count(element):
+    item, groups = element
     clearance_items = groups['clearance']
     product_count = groups['product_count'][0] if groups['product_count'] else 0
     for clearance_item in clearance_items:
@@ -69,7 +69,7 @@ def join_with_product_count(kv):
             else 'normal'
         )
         clearance_item['productId'] = clearance_item['productId'] if clearance_item['productId'] is not None else ''
-    return clearance_items
+        yield clearance_item
 
 def run(argv=None):
     options = PipelineOptions(argv)
@@ -176,3 +176,4 @@ if __name__ == '__main__':
         '--output_path', 'C:\\output\\path'
     ]
     run(argv)
+
