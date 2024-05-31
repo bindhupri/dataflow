@@ -5,6 +5,11 @@ from apache_beam.io.gcp.bigquery import ReadFromBigQuery
 from apache_beam.io.parquetio import WriteToParquet
 from datetime import date
 import json
+from apache_beam.io.parquetio import WriteToParquet
+from apache_beam.io.parquetio import parquet_schema
+from datetime import date
+import pyarrow as pa
+
 
 class CustomOptions(PipelineOptions):
     @classmethod
@@ -132,11 +137,40 @@ def run(argv=None):
                                  | 'Create Club Overrides Field' >> beam.Map(create_club_overrides_field)
         )
 
+        # Define schema
+        parquet_schema = pa.schema([
+            ('startDate', pa.string()),
+            ('endDate', pa.string()),
+            ('basePrice', pa.float64()),
+            ('discountValue', pa.float64()),
+            ('itemId', pa.string()),
+            ('clubs', pa.list_(pa.int32())),
+            ('timeZone', pa.string()),
+            ('savingsId', pa.string()),
+            ('savingsType', pa.string()),
+            ('applicableChannels', pa.list_(pa.string())),
+            ('discountType', pa.string()),
+            ('eventTag', pa.int32()),
+            ('members', pa.list_(pa.string())),
+            ('items', pa.list_(pa.struct([
+                ('itemId', pa.string()),
+                ('productId', pa.string()),
+                ('itemType', pa.string()),
+                ('productItemMappingStatus', pa.string())
+            ]))),
+            ('clubOverrides', pa.list_(pa.struct([
+                ('clubNumber', pa.int32()),
+                ('clubStartDate', pa.string()),
+                ('clubEndDate', pa.string())
+            ]))),
+        ])
+
         # Write to Parquet on local drive (C: drive)
         output_path = custom_options.output_path
         final_clearance_items | 'Write to Parquet' >> WriteToParquet(
             file_path_prefix=os.path.join(output_path, str(date.today())),
-            file_name_suffix='.parquet'
+            file_name_suffix='.parquet',
+            schema=parquet_schema
         )
 
 
