@@ -1,10 +1,10 @@
+import os
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
 from apache_beam.io.gcp.bigquery import ReadFromBigQuery
 from apache_beam.io.parquetio import WriteToParquet
 from datetime import date
 import json
-import os
 
 class CustomOptions(PipelineOptions):
     @classmethod
@@ -69,6 +69,7 @@ def run(argv=None):
                 on t1.PROD_ID = t2.PROD_ID
                 where t2.PROD_STATUS_CD = 'ACTIVE'
     """
+
 
     with beam.Pipeline(options=options) as p:
         # Read clearance items
@@ -171,17 +172,21 @@ def clearance_items_metadata_schema():
 
 def parse_table_schema_from_json(schema_json):
     from apache_beam.io.gcp.internal.clients import bigquery
-    return bigquery.TableSchema(
-        fields=[
-            bigquery.TableFieldSchema(
-                name=field['name'],
-                type=field['type'],
-                mode=field.get('mode', 'NULLABLE'),
-                fields=parse_table_schema_from_json(field.get('fields', '')) if 'fields' in field else None
-            )
-            for field in json.loads(schema_json)['fields']
-        ]
-    )
+    schema = bigquery.TableSchema()
+    fields = json.loads(schema_json)['fields']
+    for field in fields:
+        schema.fields.append(parse_table_field_schema(field))
+    return schema
+
+def parse_table_field_schema(field):
+    from apache_beam.io.gcp.internal.clients import bigquery
+    field_schema = bigquery.TableFieldSchema()
+    field_schema.name = field['name']
+    field_schema.type = field['type']
+    field_schema.mode = field.get('mode', 'NULLABLE')
+    if 'fields' in field:
+        field_schema.fields = [parse_table_field_schema(f) for f in field['fields']]
+    return field_schema
 
 # Run the pipeline
 if __name__ == '__main__':
