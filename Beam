@@ -4,6 +4,7 @@ from apache_beam.io.gcp.bigquery import ReadFromBigQuery
 from apache_beam.io.parquetio import WriteToParquet
 from datetime import date
 import json
+import os
 
 class CustomOptions(PipelineOptions):
     @classmethod
@@ -55,17 +56,15 @@ def run(argv=None):
     custom_options.view_as(StandardOptions).runner = 'DirectRunner'
 
     query_clearance_items = """
-    SELECT t2.effectivedate, t2.expirationdate, t1.retailamount as originalamount, 
-           t1.retailamount - t2.retailamount as discountedamount, 
-           t1.itemnbr, t1.clubnbr
-    FROM `prod-sams-cdp.prod_pricing_wingman_pricing.current_retail_action` t1
-    JOIN `prod-sams-cdp.prod_pricing_wingman_pricing.current_retail_action` t2
-    ON t1.itemnbr = t2.itemnbr
-    WHERE t1.retailtype ="BP" and t1.clubnbr = 6279 and t2.retailtype ="MD" and t2.clubnbr = 6279 and DATE(t2.effectivedate) <= CURRENT_DATE() and DATE(t2.expirationdate) >= CURRENT_DATE() and t1.retailamount-t2.retailamount > 0"""
+    SELECT t2.effectivedate,t2.expirationdate, t1.retailamount as originalamount, t1.retailamount-t2.retailamount as discountedamount, t1.itemnbr, t1.clubnbr
+            FROM `prod-sams-cdp.prod_pricing_wingman_pricing.current_retail_action` t1
+            JOIN `prod-sams-cdp.prod_pricing_wingman_pricing.current_retail_action` t2
+            ON t1.itemnbr=t2.itemnbr
+            WHERE t1.retailtype ="BP" and t1.clubnbr = 6279 and t2.retailtype ="MD" and t2.clubnbr = 6279 and DATE(t2.effectivedate) <= CURRENT_DATE() and DATE(t2.expirationdate) >= CURRENT_DATE() and t1.retailamount-t2.retailamount > 0
+    """
 
     query_cdp_items = """
-    SELECT t1.PROD_ID, t1.ITEM_NBR 
-    FROM `prod-sams-cdp.US_SAMS_PRODUCT360_CDP_VM.CLUB_ITEM_GRP` t1
+    select t1.PROD_ID, t1.ITEM_NBR FROM `prod-sams-cdp.US_SAMS_PRODUCT360_CDP_VM.CLUB_ITEM_GRP` t1
                 join `prod-sams-cdp.US_SAMS_PRODUCT360_CDP_VM.PROD` t2
                 on t1.PROD_ID = t2.PROD_ID
                 where t2.PROD_STATUS_CD = 'ACTIVE'
@@ -170,6 +169,21 @@ def clearance_items_metadata_schema():
     })
     return parse_table_schema_from_json(schema_str)
 
+def parse_table_schema_from_json(schema_json):
+    from apache_beam.io.gcp.internal.clients import bigquery
+    return bigquery.TableSchema(
+        fields=[
+            bigquery.TableFieldSchema(
+                name=field['name'],
+                type=field['type'],
+                mode=field.get('mode', 'NULLABLE'),
+                fields=parse_table_schema_from_json(field.get('fields', '')) if 'fields' in field else None
+            )
+            for field in json.loads(schema_json)['fields']
+        ]
+    )
+
+# Run the pipeline
 if __name__ == '__main__':
     import sys
     argv = [
