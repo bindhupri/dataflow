@@ -141,52 +141,35 @@ def run(argv=None):
         )
 
 def clearance_items_metadata_schema():
-    schema_str = json.dumps({
-        "fields": [
-            {"name": "startDate", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "endDate", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "basePrice", "type": "FLOAT", "mode": "NULLABLE"},
-            {"name": "discountValue", "type": "FLOAT", "mode": "NULLABLE"},
-            {"name": "timeZone", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "savingsId", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "savingsType", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "applicableChannels", "type": "STRING", "mode": "REPEATED"},
-            {"name": "discountType", "type": "STRING", "mode": "NULLABLE"},
-            {"name": "eventTag", "type": "INTEGER", "mode": "NULLABLE"},
-            {"name": "members", "type": "STRING", "mode": "REPEATED"},
-            {"name": "items", "type": "RECORD", "mode": "REPEATED", "fields": [
-                {"name": "itemId", "type": "STRING", "mode": "NULLABLE"},
-                {"name": "productId", "type": "STRING", "mode": "NULLABLE"},
-                {"name": "itemType", "type": "STRING", "mode": "NULLABLE"},
-                {"name": "productItemMappingStatus", "type": "STRING", "mode": "NULLABLE"}
-            ]},
-            {"name": "clubOverrides", "type": "RECORD", "mode": "REPEATED", "fields": [
-                {"name": "clubNumber", "type": "INTEGER", "mode": "NULLABLE"},
-                {"name": "clubStartDate", "type": "STRING", "mode": "NULLABLE"},
-                {"name": "clubEndDate", "type": "STRING", "mode": "NULLABLE"}
-            ]},
-            {"name": "clubs", "type": "INTEGER", "mode": "REPEATED"}
-        ]
-    })
-    return parse_table_schema_from_json(schema_str)
-
-def parse_table_schema_from_json(schema_json):
     from apache_beam.io.gcp.internal.clients import bigquery
     schema = bigquery.TableSchema()
-    fields = json.loads(schema_json)['fields']
-    for field in fields:
-        schema.fields.append(parse_table_field_schema(field))
+    fields = [
+        bigquery.TableFieldSchema(name='startDate', type='STRING', mode='NULLABLE'),
+        bigquery.TableFieldSchema(name='endDate', type='STRING', mode='NULLABLE'),
+        bigquery.TableFieldSchema(name='basePrice', type='FLOAT', mode='NULLABLE'),
+        bigquery.TableFieldSchema(name='discountValue', type='FLOAT', mode='NULLABLE'),
+        bigquery.TableFieldSchema(name='timeZone', type='STRING', mode='NULLABLE'),
+        bigquery.TableFieldSchema(name='savingsId', type='STRING', mode='NULLABLE'),
+        bigquery.TableFieldSchema(name='savingsType', type='STRING', mode='NULLABLE'),
+        bigquery.TableFieldSchema(name='applicableChannels', type='STRING', mode='REPEATED'),
+        bigquery.TableFieldSchema(name='discountType', type='STRING', mode='NULLABLE'),
+        bigquery.TableFieldSchema(name='eventTag', type='INTEGER', mode='NULLABLE'),
+        bigquery.TableFieldSchema(name='members', type='STRING', mode='REPEATED'),
+        bigquery.TableFieldSchema(name='items', type='RECORD', mode='REPEATED', fields=[
+            bigquery.TableFieldSchema(name='itemId', type='STRING', mode='NULLABLE'),
+            bigquery.TableFieldSchema(name='productId', type='STRING', mode='NULLABLE'),
+            bigquery.TableFieldSchema(name='itemType', type='STRING', mode='NULLABLE'),
+            bigquery.TableFieldSchema(name='productItemMappingStatus', type='STRING', mode='NULLABLE')
+        ]),
+        bigquery.TableFieldSchema(name='clubOverrides', type='RECORD', mode='REPEATED', fields=[
+            bigquery.TableFieldSchema(name='clubNumber', type='INTEGER', mode='NULLABLE'),
+            bigquery.TableFieldSchema(name='clubStartDate', type='STRING', mode='NULLABLE'),
+            bigquery.TableFieldSchema(name='clubEndDate', type='STRING', mode='NULLABLE')
+        ]),
+        bigquery.TableFieldSchema(name='clubs', type='INTEGER', mode='REPEATED')
+    ]
+    schema.fields.extend(fields)
     return schema
-
-def parse_table_field_schema(field):
-    from apache_beam.io.gcp.internal.clients import bigquery
-    field_schema = bigquery.TableFieldSchema()
-    field_schema.name = field['name']
-    field_schema.type = field['type']
-    field_schema.mode = field.get('mode', 'NULLABLE')
-    if 'fields' in field:
-        field_schema.fields = [parse_table_field_schema(f) for f in field['fields']]
-    return field_schema
 
 # Run the pipeline
 if __name__ == '__main__':
