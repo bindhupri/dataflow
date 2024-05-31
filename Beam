@@ -136,40 +136,9 @@ def run(argv=None):
         output_path = custom_options.output_path
         final_clearance_items | 'Write to Parquet' >> WriteToParquet(
             file_path_prefix=os.path.join(output_path, str(date.today())),
-            file_name_suffix='.parquet',
-            schema=clearance_items_metadata_schema()
+            file_name_suffix='.parquet'
         )
 
-def clearance_items_metadata_schema():
-    from apache_beam.io.gcp.internal.clients import bigquery
-    schema = bigquery.TableSchema()
-    fields = [
-        bigquery.TableFieldSchema(name='startDate', type='STRING', mode='NULLABLE'),
-        bigquery.TableFieldSchema(name='endDate', type='STRING', mode='NULLABLE'),
-        bigquery.TableFieldSchema(name='basePrice', type='FLOAT', mode='NULLABLE'),
-        bigquery.TableFieldSchema(name='discountValue', type='FLOAT', mode='NULLABLE'),
-        bigquery.TableFieldSchema(name='timeZone', type='STRING', mode='NULLABLE'),
-        bigquery.TableFieldSchema(name='savingsId', type='STRING', mode='NULLABLE'),
-        bigquery.TableFieldSchema(name='savingsType', type='STRING', mode='NULLABLE'),
-        bigquery.TableFieldSchema(name='applicableChannels', type='STRING', mode='REPEATED'),
-        bigquery.TableFieldSchema(name='discountType', type='STRING', mode='NULLABLE'),
-        bigquery.TableFieldSchema(name='eventTag', type='INTEGER', mode='NULLABLE'),
-        bigquery.TableFieldSchema(name='members', type='STRING', mode='REPEATED'),
-        bigquery.TableFieldSchema(name='items', type='RECORD', mode='REPEATED', fields=[
-            bigquery.TableFieldSchema(name='itemId', type='STRING', mode='NULLABLE'),
-            bigquery.TableFieldSchema(name='productId', type='STRING', mode='NULLABLE'),
-            bigquery.TableFieldSchema(name='itemType', type='STRING', mode='NULLABLE'),
-            bigquery.TableFieldSchema(name='productItemMappingStatus', type='STRING', mode='NULLABLE')
-        ]),
-        bigquery.TableFieldSchema(name='clubOverrides', type='RECORD', mode='REPEATED', fields=[
-            bigquery.TableFieldSchema(name='clubNumber', type='INTEGER', mode='NULLABLE'),
-            bigquery.TableFieldSchema(name='clubStartDate', type='STRING', mode='NULLABLE'),
-            bigquery.TableFieldSchema(name='clubEndDate', type='STRING', mode='NULLABLE')
-        ]),
-        bigquery.TableFieldSchema(name='clubs', type='INTEGER', mode='REPEATED')
-    ]
-    schema.fields.extend(fields)
-    return schema
 
 # Run the pipeline
 if __name__ == '__main__':
