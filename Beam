@@ -1,6 +1,6 @@
 import os
 import apache_beam as beam
-from apache_beam.options.pipeline_options import PipelineOptions, StandardOptions
+from apache_beam.options.pipeline_options import PipelineOptions,GoogleCloudOptions, StandardOptions
 from apache_beam.io.gcp.bigquery import ReadFromBigQuery
 from apache_beam.io.parquetio import WriteToParquet
 from datetime import date
@@ -14,7 +14,10 @@ class CustomOptions(PipelineOptions):
     @classmethod
     def _add_argparse_args(cls, parser):
         parser.add_argument('--output_path', required=True, help='Path to write output data')
-        #parser.add_argument('--project', required=True, help='GCP project ID')
+        parser.add_argument('--temp_gcs_location',required=True,help='temp GCS location')
+        #parser.add_argument('--project',required=True,help='project name')
+        #parser.add_argument('--region',required=True,help='region')
+
 
 def format_clearance_item(row):
     return {
@@ -58,7 +61,11 @@ def create_club_overrides_field(row):
 def run(argv=None):
     options = PipelineOptions(argv)
     custom_options = options.view_as(CustomOptions)
-    custom_options.view_as(StandardOptions).runner = 'DirectRunner'
+    custom_options.view_as(StandardOptions).runner = 'DataflowRunner'
+    #custom_options.view_as(GoogleCloudOptions).project = custom_options.project
+    google_cloud_options=options.view_as(GoogleCloudOptions)
+    google_cloud_options.project='dev-sams-data-generator'
+    google_cloud_options.region='us-east1'
 
     query_clearance_items = """
     SELECT t2.effectivedate,t2.expirationdate, t1.retailamount as originalamount, t1.retailamount-t2.retailamount as discountedamount, t1.itemnbr, t1.clubnbr
@@ -79,13 +86,13 @@ def run(argv=None):
     with beam.Pipeline(options=options) as p:
         # Read clearance items
         clearance_items_metadata = (p 
-                                    | 'Read Clearance Items' >> beam.io.ReadFromBigQuery(query=query_clearance_items, use_standard_sql=True, project='dev-sams-data-generator')
+                                    | 'Read Clearance Items' >> beam.io.ReadFromBigQuery(query=query_clearance_items, use_standard_sql=True,gcs_location = 'gs://outfiles_parquet/offer_bank/temp/',project=google_cloud_options.project)
                                     | 'Format Clearance Items' >> beam.Map(format_clearance_item)
         )
 
         # Read CDP items
         cdp_items_list = (p 
-                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True, project='dev-sams-data-generator')
+                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True, gcs_location = 'gs://outfiles_parquet/offer_bank/temp/',project=google_cloud_options.project)
                           | 'Extract Key' >> beam.Map(lambda row: (row['ITEM_NBR'], row))
         )
 
@@ -176,8 +183,4 @@ def run(argv=None):
 
 # Run the pipeline
 if __name__ == '__main__':
-    import sys
-    argv = [
-        '--output_path', '/Users/vn53tqg/'
-    ]
-    run(argv)
+    run()
