@@ -110,7 +110,7 @@ def run(argv=None):
     except Exception as error:
         raise Exception(f"Error while fetching secrets from secret manager: {error}")
  
-    with beam.Pipeline(options=PipelineOptions) as p:
+    with beam.Pipeline(options=options) as p:
         # Fetch and transform offer metadata
         offer_metadata = (
             p | 'FetchOfferMetadata' >> fetch_and_transform_offer_metadata(jdbc_url, jdbc_user, jdbc_password)
