@@ -93,18 +93,14 @@ class CustomPipelineOptions(PipelineOptions):
         parser.add_argument('--savings_ds_bucket', required=True, help='GCS Bucket for savings dataset')
  
 def run(argv=None):
-    pipeline_options = PipelineOptions()
-    custom_options = pipeline_options.view_as(CustomPipelineOptions)
+    options = PipelineOptions(argv)
+    custom_options = options.view_as(CustomOptions)
+    custom_options.view_as(StandardOptions).runner = 'DataflowRunner'
+    custom_options.view_as(GoogleCloudOptions).project = custom_options.project
+    google_cloud_options=options.view_as(GoogleCloudOptions)
+    google_cloud_options.project='dev-sams-data-generator'
+    google_cloud_options.region='us-central1'
     project_id = custom_options.project_id
-    env = custom_options.env
-    savings_ds_bucket = custom_options.savings_ds_bucket
-    
-    google_cloud_options = pipeline_options.view_as(GoogleCloudOptions)
-    google_cloud_options.project = project_id
-    google_cloud_options.job_name = 'your-job-name'
-    google_cloud_options.staging_location = 'gs://your-staging-location'
-    google_cloud_options.temp_location = 'gs://your-temp-location'
-    pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
  
     try:
         jdbc_url = access_secret_version(project_id, f'{env}PostgresJdbcUrl', 'latest')
@@ -118,9 +114,9 @@ def run(argv=None):
         offer_metadata = (
             p | 'FetchOfferMetadata' >> fetch_and_transform_offer_metadata(jdbc_url, jdbc_user, jdbc_password)
         )
- 
+    '''
         # Fetch product-item mapping from BigQuery
-        product_item_mapping = fetch_product_item_mapping()
+        #product_item_mapping = fetch_product_item_mapping()
  
         # Combine the two datasets
         combined = (
@@ -161,7 +157,7 @@ def run(argv=None):
         (
             combined
             | 'WriteToParquet' >> WriteToParquet(file_path_prefix=output_path, schema=schema)
-        )
+        )'''
  
 if __name__ == '__main__':
     run()
