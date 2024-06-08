@@ -2,6 +2,7 @@ import argparse
 import os
 from datetime import date
 import google_crc32c
+import psycopg2
 from google.cloud import secretmanager
 import apache_beam as beam
 from apache_beam.options.pipeline_options import PipelineOptions, GoogleCloudOptions, StandardOptions
@@ -50,27 +51,31 @@ def transform_offer_metadata(offer):
     offer['productItemMappingStatus'] = ""
     
     return offer
- 
-# Function to fetch offer metadata and transform it
-def fetch_and_transform_offer_metadata(jdbc_url, jdbc_user, jdbc_password):
-    return (
-beam.io.ReadFromJdbc(
-            driver_class_name='org.postgresql.Driver',
-            jdbc_url=jdbc_url,
-            username=jdbc_user,
-            password=jdbc_password,
-            query="""
-                select o.offer_id, o.offer_source, o.start_datetime, o.end_datetime, o.time_zone, o.discount_type, o.discount_value,
-                o.applicable_channel, o.club_list, o.labels, oi.item_number, oi.product_id, oi.item_type, mo.membership_id,
-                oc.club_number as exclusive_club_number, oc.start_datetime as exclusive_club_startdate, oc.end_datetime as exclusive_club_enddate
-                from public.offers o
-                left join public.member_offers mo on o.offer_id = mo.offer_id
-                left join public.offer_items_v2 oi on o.offer_id = oi.offer_id
-                left join public.club_overrides oc on o.offer_id = oc.offer_id
-                where o.start_datetime <= now() and o.end_datetime >= now() and o.offer_source = 'BROADREACH' and o.discount_value > 0 and discount_value != 'NaN' and oi.item_number IS NOT NULL and o.discount_type in ('DOLLAR_OFF_EACH','AMOUNT_OFF','PERCENT_OFF')
-            """)
-        | 'TransformOfferMetadata' >> beam.Map(transform_offer_metadata)
-    )
+
+# Function to fetch offer metadata and transform it 
+def fetch_and_transform_offer_metadata(jdbc_url, jdbc_user, jdbc_password): 
+    query = """ select o.offer_id, o.offer_source, o.start_datetime, o.end_datetime, o.time_zone, o.discount_type, o.discount_value, 
+    o.applicable_channel, o.club_list, o.labels, oi.item_number, oi.product_id, oi.item_type, mo.membership_id,
+    oc.club_number as exclusive_club_number, oc.start_datetime as exclusive_club_startdate, oc.end_datetime as exclusive_club_enddate 
+    from public.offers o 
+    left join public.member_offers mo on o.offer_id = mo.offer_id 
+    left join public.offer_items_v2 oi on o.offer_id = oi.offer_id 
+    left join public.club_overrides oc on o.offer_id = oc.offer_id 
+    where o.start_datetime <= now() and o.end_datetime >= now() and o.offer_source = 'BROADREACH' and o.discount_value > 0 and discount_value != 'NaN' and oi.item_number IS NOT NULL and o.discount_type in ('DOLLAR_OFF_EACH','AMOUNT_OFF','PERCENT_OFF') 
+    """ 
+    def read_from_postgres(): 
+        conn = psycopg2.connect(jdbc_url, user=jdbc_user, password=jdbc_password) 
+        cursor = conn.cursor() 
+        cursor.execute(query) 
+        rows = cursor.fetchall() 
+        cursor.close() 
+        conn.close() 
+        field_names = [desc[0] for desc in cursor.description] 
+        for row in rows: 
+            yield dict(zip(field_names, row)) 
+    
+    return ( beam.Create(read_from_postgres()) | 'TransformOfferMetadata' >> beam.Map(transform_offer_metadata) )
+
  
 # Function to fetch product-item mapping from BigQuery
 def fetch_product_item_mapping():
