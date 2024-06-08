@@ -94,13 +94,14 @@ class CustomPipelineOptions(PipelineOptions):
  
 def run(argv=None):
     options = PipelineOptions(argv)
-    custom_options = options.view_as(CustomOptions)
+    custom_options = options.view_as(CustomPipelineOptions)
     custom_options.view_as(StandardOptions).runner = 'DataflowRunner'
-    custom_options.view_as(GoogleCloudOptions).project = custom_options.project
+    custom_options.view_as(GoogleCloudOptions).project = custom_options.project_id
     google_cloud_options=options.view_as(GoogleCloudOptions)
     google_cloud_options.project='dev-sams-data-generator'
     google_cloud_options.region='us-central1'
     project_id = custom_options.project_id
+    env = custom_options.env
  
     try:
         jdbc_url = access_secret_version(project_id, f'{env}PostgresJdbcUrl', 'latest')
@@ -109,7 +110,7 @@ def run(argv=None):
     except Exception as error:
         raise Exception(f"Error while fetching secrets from secret manager: {error}")
  
-    with beam.Pipeline(options=pipeline_options) as p:
+    with beam.Pipeline(options=PipelineOptions) as p:
         # Fetch and transform offer metadata
         offer_metadata = (
             p | 'FetchOfferMetadata' >> fetch_and_transform_offer_metadata(jdbc_url, jdbc_user, jdbc_password)
