@@ -4,6 +4,7 @@ from apache_beam.options.pipeline_options import PipelineOptions,GoogleCloudOpti
 from apache_beam.io.gcp.bigquery import ReadFromBigQuery
 from apache_beam.io.parquetio import WriteToParquet
 from datetime import date
+from decimal import Decimal
 import json
 from apache_beam.io.parquetio import WriteToParquet
 from datetime import date
@@ -23,9 +24,9 @@ def format_clearance_item(row):
     return {
         'startDate': row['effectivedate'],
         'endDate': row['expirationdate'],
-        'basePrice': row['originalamount'],
-        'discountValue': row['discountedamount'],
-        'itemId': row['itemnbr'],
+        'basePrice': str(row['originalamount']),
+        'discountValue': str(row['discountedamount']),
+        'itemId': str(row['itemnbr']),
         'clubs': [int(row['clubnbr'])],
         'timeZone': 'UTC',
         'savingsId': f"{row['clubnbr']}{row['itemnbr']}",
@@ -87,6 +88,16 @@ def add_product_item_mapping_status(row):
 def replace_null_with_empty(row):
     if row['productId'] is None:
         row['productId'] = ''
+    return row
+
+def convert_decimal_to_float(row):
+    for key, value in row.items():
+        if isinstance(value, Decimal):
+            row[key] = float(value)
+        elif isinstance(value, list):  # If value is a list, recursively convert items
+            row[key] = [float(item) if isinstance(item, Decimal) else item for item in value]
+        elif isinstance(value, dict):  # If value is a dictionary, recursively convert items
+            row[key] = convert_decimal_to_float(value)
     return row
 
 def run(argv=None):
@@ -226,6 +237,10 @@ def run(argv=None):
         # Replace null values with empty string
         final_joined_metadata2 = final_joined_metadata1 | 'Replace Null with Empty' >> beam.Map(replace_null_with_empty)
 
+        # Convert decimal to float
+        #final_joined_metadata3 =  final_joined_metadata2 | 'Convert Decimal to Float' >> beam.Map(convert_decimal_to_float)
+        
+
         # Final processing
         final_clearance_items = ( final_joined_metadata2
                                  | 'Create Items Field' >> beam.Map(create_items_field)
@@ -234,15 +249,13 @@ def run(argv=None):
 
         final_written = ( final_clearance_items | 'Write finalto GCS' >> beam.io.WriteToText(output_final_path, file_name_suffix=".json") )
 
-'''
-        
 
         # Define schema
         parquet_schema = pa.schema([
             ('startDate', pa.string()),
             ('endDate', pa.string()),
-            ('basePrice', pa.float64()),
-            ('discountValue', pa.float64()),
+            ('basePrice', pa.decimal128(16, 6)),
+            ('discountValue', pa.decimal128(16, 6)),
             ('itemId', pa.string()),
             ('clubs', pa.list_(pa.int32())),
             ('timeZone', pa.string()),
@@ -263,6 +276,9 @@ def run(argv=None):
                 ('clubStartDate', pa.string()),
                 ('clubEndDate', pa.string())
             ]))),
+            ('productId', pa.string()), 
+            ('ProductCount', pa.int32()), 
+            ('productItemMappingStatus', pa.string())
         ])
 
         # Write to Parquet on local drive (C: drive)
@@ -272,7 +288,7 @@ def run(argv=None):
             file_name_suffix='.parquet',
             schema=parquet_schema
         )
-'''
+
 
 # Run the pipeline
 if __name__ == '__main__':
