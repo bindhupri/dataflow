@@ -24,6 +24,37 @@ def access_secret_version(project_id, secret_id, version_id='latest'):
 
 output_offer_metadata_path = "gs://outfiles_parquet/offer_bank/offer_result/offer_metadata.json" 
 
+# Define transformation function for offers metadata
+def transform_offer_metadata(offer):
+    from datetime import datetime
+    from decimal import Decimal
+ 
+    def parse_date(date_str):
+        return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S") if date_str else None
+ 
+    offer['savingsId'] = str(offer['offer_id'])
+    offer['savingsType'] = offer['offer_source']
+    offer['startDate'] = parse_date(offer['start_datetime']).strftime("%Y-%m-%d %H:%M:%S") if offer['start_datetime'] else ""
+    offer['endDate'] = parse_date(offer['end_datetime']).strftime("%Y-%m-%d %H:%M:%S") if offer['end_datetime'] else ""
+    offer['timeZone'] = offer['time_zone']
+    offer['discountType'] = offer['discount_type']
+    offer['discountValue'] = float(offer['discount_value'])  # Ensure proper handling of discount_value
+    offer['applicableChannels'] = offer['applicable_channel']
+    offer['clubs'] = offer['club_list']
+    offer['exclusiveClubStartDate'] = parse_date(offer['exclusive_club_startdate']).strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_startdate'] else ""
+    offer['exclusiveClubEndDate'] = parse_date(offer['exclusive_club_enddate']).strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_enddate'] else ""
+    offer['labels'] = offer['labels'] if offer['labels'] else []
+    offer['eventTag'] = 2 if 'event' in offer['labels'] else 1 if 'ISB' in offer['labels'] else 0
+    offer['basePrice'] = 0.0
+    offer['itemId'] = offer['item_number']
+    offer['productId'] = offer['product_id'] if offer['product_id'] else ""
+    offer['itemType'] = offer['item_type'] if offer['item_type'] else "DiscountedItem"
+    offer['clubNumber'] = int(offer['exclusive_club_number']) if offer['exclusive_club_number'] else 0
+    offer['productItemMappingStatus'] = ""
+    
+    return offer
+ 
+ 
 # Function to fetch offer metadata 
 def fetch_offer_metadata(jdbc_url, jdbc_user, jdbc_password):
     query = """
@@ -77,6 +108,10 @@ def run(argv=None):
     project = custom_options.project_id
     env = custom_options.env
     savings_ds_bucket = custom_options.savings_ds_bucket
+
+    # Ensure the project is set in pipeline options
+    google_cloud_options = pipeline_options.view_as(GoogleCloudOptions)
+    google_cloud_options.project = project
  
     try:
         jdbc_url = access_secret_version(project, f'{env}PostgresJdbcUrl', 'latest')
@@ -90,6 +125,7 @@ def run(argv=None):
         offer_metadata = (
             p
             | 'FetchOfferMetadata' >> fetch_offer_metadata(jdbc_url, jdbc_user, jdbc_password) 
+			| 'TransformOfferMetadata' >> beam.Map(transform_offer_metadata)
         )
 
         offer_metadata_written = (
