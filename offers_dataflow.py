@@ -40,9 +40,9 @@ def fetch_offer_metadata(jdbc_url, jdbc_user, jdbc_password):
     def read_from_postgres():
         parsed_url = urllib.parse.urlparse(jdbc_url)
         conn = psycopg2.connect(
-            host=parsed_url.hostname,
-            port=parsed_url.port or 5432,
-            dbname=parsed_url.path[1:],
+            host="10.51.181.97",
+            port=5432,
+            dbname="sams_offer_bank",
             user=jdbc_user,
             password=jdbc_password
         )
@@ -74,14 +74,14 @@ class CustomPipelineOptions(PipelineOptions):
 def run(argv=None):
     pipeline_options = PipelineOptions(argv)
     custom_options = pipeline_options.view_as(CustomPipelineOptions)
-    project_id = custom_options.project_id
+    project = custom_options.project_id
     env = custom_options.env
     savings_ds_bucket = custom_options.savings_ds_bucket
  
     try:
-        jdbc_url = access_secret_version(project_id, f'{env}PostgresJdbcUrl', 'latest')
-        jdbc_user = access_secret_version(project_id, f'{env}PostgresRWUser', 'latest')
-        jdbc_password = access_secret_version(project_id, f'{env}PostgresRWPassword', 'latest')
+        jdbc_url = access_secret_version(project, f'{env}PostgresJdbcUrl', 'latest')
+        jdbc_user = access_secret_version(project, f'{env}PostgresRWUser', 'latest')
+        jdbc_password = access_secret_version(project, f'{env}PostgresRWPassword', 'latest')
     except Exception as error:
         raise Exception(f"Error while fetching secrets from secret manager: {error}")
 
