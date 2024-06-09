@@ -24,7 +24,8 @@ def access_secret_version(project_id, secret_id, version_id='latest'):
 
 output_offer_metadata_path = "gs://outfiles_parquet/offer_bank/offer_result/offer_metadata.json" 
 
-# Define transformation function for offers metadata 
+
+# Rename and format columns using the same names as in the PySpark code
 def transform_offer_metadata(offer):
     offer['savingsId'] = str(offer['offer_id'])
     offer['savingsType'] = offer['offer_source']
@@ -35,19 +36,29 @@ def transform_offer_metadata(offer):
     offer['discountValue'] = float(offer['discount_value'])  # Ensure proper handling of discount_value
     offer['applicableChannels'] = offer['applicable_channel']
     offer['clubs'] = offer['club_list']
-    offer['exclusiveClubStartDate'] = offer['exclusive_club_startdate'].strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_startdate'] else ""
-    offer['exclusiveClubEndDate'] = offer['exclusive_club_enddate'].strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_enddate'] else ""
+    offer['exclusive_club_startdate'] = offer['exclusive_club_startdate'].strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_startdate'] else ""
+    offer['exclusive_club_enddate'] = offer['exclusive_club_enddate'].strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_enddate'] else ""
     offer['labels'] = offer['labels'] if offer['labels'] else []
     offer['eventTag'] = 2 if 'event' in offer['labels'] else 1 if 'ISB' in offer['labels'] else 0
     offer['basePrice'] = 0.0
+    offer['exclusive_club_number'] = int(offer['exclusive_club_number']) if offer['exclusive_club_number'] else 0
     offer['itemId'] = offer['item_number']
     offer['productId'] = offer['product_id'] if offer['product_id'] else ""
     offer['itemType'] = offer['item_type'] if offer['item_type'] else "DiscountedItem"
-    offer['clubNumber'] = int(offer['exclusive_club_number']) if offer['exclusive_club_number'] else 0
     offer['productItemMappingStatus'] = ""
     
-    return offer
- 
+    # Delete the original keys used for renaming
+    del offer['offer_id']
+    del offer['offer_source']
+    del offer['start_datetime']
+    del offer['end_datetime']
+    del offer['time_zone']
+    del offer['discount_type']
+    del offer['discount_value']
+    del offer['applicable_channel']
+    del offer['club_list'] 
+    
+    return offer 
  
 # Function to fetch offer metadata 
 def fetch_offer_metadata(jdbc_url, jdbc_user, jdbc_password):
