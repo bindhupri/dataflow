@@ -24,25 +24,19 @@ def access_secret_version(project_id, secret_id, version_id='latest'):
 
 output_offer_metadata_path = "gs://outfiles_parquet/offer_bank/offer_result/offer_metadata.json" 
 
-# Define transformation function for offers metadata
+# Define transformation function for offers metadata 
 def transform_offer_metadata(offer):
-    from datetime import datetime
-    from decimal import Decimal
- 
-    def parse_date(date_str):
-        return datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S") if date_str else None
- 
     offer['savingsId'] = str(offer['offer_id'])
     offer['savingsType'] = offer['offer_source']
-    offer['startDate'] = parse_date(offer['start_datetime']).strftime("%Y-%m-%d %H:%M:%S") if offer['start_datetime'] else ""
-    offer['endDate'] = parse_date(offer['end_datetime']).strftime("%Y-%m-%d %H:%M:%S") if offer['end_datetime'] else ""
+    offer['startDate'] = offer['start_datetime'].strftime("%Y-%m-%d %H:%M:%S") if offer['start_datetime'] else ""
+    offer['endDate'] = offer['end_datetime'].strftime("%Y-%m-%d %H:%M:%S") if offer['end_datetime'] else ""
     offer['timeZone'] = offer['time_zone']
     offer['discountType'] = offer['discount_type']
     offer['discountValue'] = float(offer['discount_value'])  # Ensure proper handling of discount_value
     offer['applicableChannels'] = offer['applicable_channel']
     offer['clubs'] = offer['club_list']
-    offer['exclusiveClubStartDate'] = parse_date(offer['exclusive_club_startdate']).strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_startdate'] else ""
-    offer['exclusiveClubEndDate'] = parse_date(offer['exclusive_club_enddate']).strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_enddate'] else ""
+    offer['exclusiveClubStartDate'] = offer['exclusive_club_startdate'].strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_startdate'] else ""
+    offer['exclusiveClubEndDate'] = offer['exclusive_club_enddate'].strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_enddate'] else ""
     offer['labels'] = offer['labels'] if offer['labels'] else []
     offer['eventTag'] = 2 if 'event' in offer['labels'] else 1 if 'ISB' in offer['labels'] else 0
     offer['basePrice'] = 0.0
