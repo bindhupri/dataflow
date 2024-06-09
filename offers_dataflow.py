@@ -21,13 +21,7 @@ def access_secret_version(project_id, secret_id, version_id='latest'):
     if response.payload.data_crc32c != int(crc32c.hexdigest(), 16):
         raise ValueError("Data corruption detected.")
     return response.payload.data.decode("UTF-8")
-'''
-def access_secret_version(project_id, secret_id, version_id='latest'):
-    client = secretmanager.SecretManagerServiceClient()
-    name = f"projects/{project_id}/secrets/{secret_id}/versions/{version_id}"
-    response = client.access_secret_version(request={"name": name})
-    return response.payload.data.decode("UTF-8")
-'''
+
 output_offer_metadata_path = "gs://outfiles_parquet/offer_bank/offer_result/offer_metadata.json" 
 
 # Function to fetch offer metadata 
@@ -46,9 +40,9 @@ def fetch_offer_metadata(jdbc_url, jdbc_user, jdbc_password):
     def read_from_postgres():
         parsed_url = urllib.parse.urlparse(jdbc_url)
         conn = psycopg2.connect(
-            host="10.51.181.97",
-            port=5432,
-            dbname="sams_offer_bank",
+            host=parsed_url.hostname,
+            port=parsed_url.port or 5432,
+            dbname=parsed_url.path[1:],
             user=jdbc_user,
             password=jdbc_password
         )
@@ -63,55 +57,45 @@ def fetch_offer_metadata(jdbc_url, jdbc_user, jdbc_password):
         for row in rows:
             yield dict(zip(field_names, row))
 
-    return beam.Create(read_from_postgres())
+    class FetchOfferMetadata(beam.PTransform):
+        def expand(self, pcoll):
+            return pcoll | beam.Create(read_from_postgres())
 
-# Function to set pipeline options
-def set_pipeline_options(project_id):
-    options = PipelineOptions()
+    return FetchOfferMetadata()
 
-    # Set Google Cloud options
-    google_cloud_options = options.view_as(GoogleCloudOptions)
-    google_cloud_options.project = project_id
-    google_cloud_options.region = 'us-central1'
-    google_cloud_options.temp_location = 'gs://outfiles_parquet/offer_bank/temp/'
-    google_cloud_options.staging_location = 'gs://outfiles_parquet/offer_bank/stage/'
+# Define pipeline options
+class CustomPipelineOptions(PipelineOptions):
+    @classmethod
+    def _add_argparse_args(cls, parser):
+        parser.add_argument('--env', required=True, help='Environment')
+        parser.add_argument('--project_id', required=True, help='GCP Project ID')
+        parser.add_argument('--savings_ds_bucket', required=True, help='GCS Bucket for savings dataset')
+ 
+def run(argv=None):
+    pipeline_options = PipelineOptions(argv)
+    custom_options = pipeline_options.view_as(CustomPipelineOptions)
+    project_id = custom_options.project_id
+    env = custom_options.env
+    savings_ds_bucket = custom_options.savings_ds_bucket
+ 
+    try:
+        jdbc_url = access_secret_version(project_id, f'{env}PostgresJdbcUrl', 'latest')
+        jdbc_user = access_secret_version(project_id, f'{env}PostgresRWUser', 'latest')
+        jdbc_password = access_secret_version(project_id, f'{env}PostgresRWPassword', 'latest')
+    except Exception as error:
+        raise Exception(f"Error while fetching secrets from secret manager: {error}")
 
-    # Set standard options
-    options.view_as(StandardOptions).runner = 'DataflowRunner'
-
-    return options
-
-def dict_to_csv(dict_data):
-    output = ','.join(map(str, dict_data.values()))
-    return output
-
-def run():
-    # Fetch secrets from Secret Manager
-    project_id = "dev-sams-data-generator"
-    jdbc_url_secret_id = "DevPostgresJdbcUrl"
-    jdbc_user_secret_id = "DevPostgresRWUser"
-    jdbc_password_secret_id = "DevPostgresRWPassword"
-
-    jdbc_url = access_secret_version(project_id, jdbc_url_secret_id)
-    jdbc_user = access_secret_version(project_id, jdbc_user_secret_id)
-    jdbc_password = access_secret_version(project_id, jdbc_password_secret_id)
-
-    # Set pipeline options
-    options = set_pipeline_options(project_id)
-
-    with beam.Pipeline(options=options) as p:
+    with beam.Pipeline(options=pipeline_options) as p:
         # Fetch offer metadata
         offer_metadata = (
             p
-            | 'FetchOfferMetadata' >> fetch_offer_metadata(jdbc_url, jdbc_user, jdbc_password)
-            | 'DictToCSV' >> beam.Map(dict_to_csv)
+            | 'FetchOfferMetadata' >> fetch_offer_metadata(jdbc_url, jdbc_user, jdbc_password) 
         )
 
-        offer_metadata_written = ( offer_metadata | 'Write offer Metadata to GCS' >> beam.io.WriteToText(output_offer_metadata_path, file_name_suffix=".json") )
+        offer_metadata_written = (
+            offer_metadata 
+            | 'Write offer Metadata to GCS' >> beam.io.WriteToText(output_offer_metadata_path, file_name_suffix=".json")
+        )
 
-        # Write to GCS as CSV
-        #output_path = 'gs://cdp_bucket_check/output/offer_metadata.csv'
-        #offer_metadata | 'WriteToGCS' >> beam.io.WriteToText(output_path, file_name_suffix='.csv')
-
-
-run()
+if __name__ == '__main__':
+    run()
