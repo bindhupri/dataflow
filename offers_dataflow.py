@@ -30,7 +30,7 @@ class GroupByAndCount(beam.DoFn):
             'ProductCount': len(set(prod_ids))
         }
 
-def transform_and_write_offer_metadata(offer_metadata,p):
+def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
     # Apply transformations
     transformed_data = (
         offer_metadata
@@ -92,7 +92,7 @@ def transform_and_write_offer_metadata(offer_metadata,p):
                 where t2.PROD_STATUS_CD = 'ACTIVE'"""
     
     cdp_items_list = (p 
-                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True, gcs_location = 'gs://outfiles_parquet/offer_bank/temp/',project=GoogleCloudOptions.project_id)
+                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True, gcs_location = 'gs://outfiles_parquet/offer_bank/temp/',project=pipeline_options.view_as(GoogleCloudOptions).project)
         )
 
     # Group by ITEM_NBR and compute distinct PROD_ID count
@@ -178,7 +178,7 @@ def run(argv=None):
             | 'broadreachoffersMetadata' >> write_broadreach_offers(jdbc_url, jdbc_user, jdbc_password) 
         )
         # Apply transformations and write to destination
-        transform_and_write_offer_metadata(offer_metadata,p)
+        transform_and_write_offer_metadata(offer_metadata,p,pipeline_options)
 
 if __name__ == '__main__':
     run()
