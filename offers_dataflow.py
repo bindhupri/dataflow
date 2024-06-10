@@ -30,38 +30,60 @@ class GroupByAndCount(beam.DoFn):
             'ProductCount': len(set(prod_ids))
         }
 
-def transform_and_write_offer_metadata(offer):
-    offer['savingsId'] = str(offer['offer_id'])
-    offer['savingsType'] = offer['offer_source']
-    offer['startDate'] = offer['start_datetime'].strftime("%Y-%m-%d %H:%M:%S") if offer['start_datetime'] else ""
-    offer['endDate'] = offer['end_datetime'].strftime("%Y-%m-%d %H:%M:%S") if offer['end_datetime'] else ""
-    offer['timeZone'] = offer['time_zone']
-    offer['discountType'] = offer['discount_type']
-    offer['discountValue'] = float(offer['discount_value'])  # Ensure proper handling of discount_value
-    offer['applicableChannels'] = offer['applicable_channel']
-    offer['clubs'] = offer['club_list']
-    offer['exclusive_club_startdate'] = offer['exclusive_club_startdate'].strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_startdate'] else ""
-    offer['exclusive_club_enddate'] = offer['exclusive_club_enddate'].strftime("%Y-%m-%d %H:%M") if offer['exclusive_club_enddate'] else ""
-    offer['labels'] = offer['labels'] if offer['labels'] else []
-    offer['eventTag'] = 2 if 'event' in offer['labels'] else 1 if 'ISB' in offer['labels'] else 0
-    offer['basePrice'] = 0.0
-    offer['exclusive_club_number'] = int(offer['exclusive_club_number']) if offer['exclusive_club_number'] else 0
-    offer['itemId'] = offer['item_number']
-    offer['productId'] = offer['product_id'] if offer['product_id'] else ""
-    offer['itemType'] = offer['item_type'] if offer['item_type'] else "DiscountedItem"
-    offer['productItemMappingStatus'] = ""
-    
-    # Delete the original keys used for renaming
-    del offer['offer_id']
-    del offer['offer_source']
-    del offer['start_datetime']
-    del offer['end_datetime']
-    del offer['time_zone']
-    del offer['discount_type']
-    del offer['discount_value']
-    del offer['applicable_channel']
-    del offer['club_list'] 
-
+def transform_and_write_offer_metadata(offer_metadata):
+    # Apply transformations
+    transformed_data = (
+        offer_metadata
+        # Apply column renaming
+        | 'RenameColumns' >> beam.Map(lambda row: {
+            'savingsId': row['offer_id'],
+            'savingsType': row['offer_source'],
+            'startDate': row['start_datetime'],
+            'endDate': row['end_datetime'],
+            'timeZone': row['time_zone'],
+            'discountType': row['discount_type'],
+            'discountValue': row['discount_value'],
+            'applicableChannels': row['applicable_channel'],
+            'clubs': row['club_list']
+        })
+        # Set default values
+        | 'SetDefaultValues' >> beam.Map(lambda row: {
+            **row,
+            'exclusive_club_startdate': row.get('exclusive_club_startdate', ''),
+            'exclusive_club_enddate': row.get('exclusive_club_enddate', ''),
+            'labels': row.get('labels', []),
+            'eventTag': 0,
+            'basePrice': 0
+        })
+        | 'SetDefaultValues' >> beam.Map(lambda row: {
+            **row,
+            'exclusive_club_number': row.get('exclusive_club_number', 0),
+            'exclusive_club_startdate': row.get('exclusive_club_startdate', ''),
+            'exclusive_club_enddate': row.get('exclusive_club_enddate', ''),
+            'item_type': row.get('item_type', 'DiscountedItem')
+        })
+        # Convert column data types
+        | 'ConvertDataTypes' >> beam.Map(lambda row: {
+            **row,
+            'basePrice': float(row['basePrice']),  # Assuming basePrice is float
+            'discountValue': float(row['discountValue']),  # Assuming discountValue is float
+            'savingsId': str(row['savingsId']),
+            'startDate': str(row['startDate']),
+            'endDate': str(row['endDate']),
+            'exclusive_club_number': int(row.get('exclusive_club_number', 0)),  # Assuming exclusive_club_number is int
+            'item_number': int(row.get('item_number', 0))  # Assuming item_number is int
+        })
+        # Set eventTag based on labels
+        | 'SetEventTag' >> beam.Map(lambda row: {
+            **row,
+            'eventTag': 2 if 'event' in row['labels'] else (1 if 'ISB' in row['labels'] else 0)
+        })
+        # Additional transformations...
+    ) 
+    offer_metadata_written = (
+            transformed_data 
+            | 'Write offer Metadata to GCS' >> beam.io.WriteToText(output_offer_metadata_path, file_name_suffix=".json")
+    )
     # cdp_items_list = get_product_item_mapping(spark)
     print("Fetching active products from cdp tables")
     query_cdp_items = """select t1.PROD_ID, t1.ITEM_NBR FROM `prod-sams-cdp.US_SAMS_PRODUCT360_CDP_VM.CLUB_ITEM_GRP` t1
@@ -154,13 +176,9 @@ def run(argv=None):
         offer_metadata = (
             p
             | 'broadreachoffersMetadata' >> write_broadreach_offers(jdbc_url, jdbc_user, jdbc_password) 
-            | 'TransformOfferMetadata' >> beam.Map(transform_and_write_offer_metadata)
         )
-
-        offer_metadata_written = (
-            offer_metadata 
-            | 'Write offer Metadata to GCS' >> beam.io.WriteToText(output_offer_metadata_path, file_name_suffix=".json")
-        )
+        # Apply transformations and write to destination
+        transform_and_write_offer_metadata(offer_metadata)
 
 if __name__ == '__main__':
     run()
