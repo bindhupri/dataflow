@@ -99,7 +99,7 @@ def transform_and_write_offer_metadata(offer_metadata, p, pipeline_options):
             'startDate': str(row['startDate']),
             'endDate': str(row['endDate']),
             'exclusive_club_number': int(row['exclusive_club_number']),  # Assuming exclusive_club_number is int
-            'item_number': int(row['item_number'])  # Assuming item_number is int
+            'item_number': str(row['item_number'])  # Assuming item_number is int
         })
         # Set eventTag based on labels
         | 'SetEventTag' >> beam.Map(lambda row: {
