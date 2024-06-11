@@ -154,6 +154,7 @@ def transform_and_write_offer_metadata(offer_metadata, p, pipeline_options):
                 for clearance_item in x[1]['offers']
                 for cdp_item in x[1]['cdp']
                 if clearance_item['item_number'] == cdp_item['ITEM_NBR'] ])
+            | 'Key by item_number for all cdp data' >> beam.Map(lambda row: (row['item_number'], row))
         )
 
     join_one_written = transformed_offer_metadata1 | 'Write join Metadata to GCS.' >> beam.io.WriteToText(output_join_one_path, file_name_suffix=".json")
