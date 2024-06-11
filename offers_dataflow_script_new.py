@@ -186,7 +186,7 @@ def transform_and_write_offer_metadata(offer_metadata, p, pipeline_options):
 
     # Apply coalesce operation to the joined PCollection
     clearanced_items_metadata2 = (
-            multiple_product_mapping_count 
+            transformed_offer_metadata3 
             | 'Coalesce productId' >> beam.Map(coalesce_product_id)
             | 'Key by itemId for clearance.' >> beam.Map(lambda row: (row['itemId'], row))
         )    
