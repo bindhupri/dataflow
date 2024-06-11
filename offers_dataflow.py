@@ -70,8 +70,8 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
             'savingsId': str(row['savingsId']),
             'startDate': str(row['startDate']),
             'endDate': str(row['endDate']),
-            'exclusive_club_number': int(row.get('exclusive_club_number', 0)),  # Assuming exclusive_club_number is int
-            'item_number': int(row.get('item_number', 0))  # Assuming item_number is int
+            'exclusive_club_number': int(row['exclusive_club_number']),  # Assuming exclusive_club_number is int
+            'item_number': int(row['exclusive_club_number'])  # Assuming item_number is int
         })
         # Set eventTag based on labels
         | 'SetEventTag' >> beam.Map(lambda row: {
@@ -79,6 +79,7 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
             'eventTag': 2 if 'event' in row['labels'] else (1 if 'ISB' in row['labels'] else 0)
         })
         # Additional transformations...
+        | 'Key by item_number for offer metadata' >> beam.Map(lambda row: (row['item_number'], row))
     ) 
     offer_metadata_written = transformed_data | 'Write offer Metadata to GCS' >> beam.io.WriteToText(output_offer_metadata_path, file_name_suffix=".json")
     
@@ -115,7 +116,7 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
         )
     
     cdp_items_list_deduplicated_written = cdp_items_list_deduplicated | 'Write offer Metadata to GCS.' >> beam.io.WriteToText(output_cdp_items_list_deduplicated_path, file_name_suffix=".json")
-'''    
+    
     # join to fetch item-product mapping only for relevant items
     transformed_offer_metadata1 = (
             {'offers': transformed_data, 'cdp': cdp_items_list_deduplicated}
@@ -126,6 +127,9 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
                 for cdp_item in x[1]['cdp']
                 if clearance_item['item_number'] == cdp_item['ITEM_NBR'] ])
         )
+
+    join_one_written = transformed_offer_metadata1 | 'Write join Metadata to GCS.' >> beam.io.WriteToText(output_join_one_path, file_name_suffix=".json")
+    
     # Join the resulting PCollection with cdp_items_list_grouped 
     transformed_offer_metadata3 = ( 
             {'offers1': transformed_offer_metadata1, 'cdp_grouped': cdp_items_list_grouped} 
@@ -135,10 +139,15 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
                 for clearance_item in x[1]['offers1'] 
                 for grouped_item in x[1]['cdp_grouped'] 
                 if clearance_item['item_number'] == grouped_item['item_number'] ]) )  
- '''               
+    
+    join_two_written = transformed_offer_metadata3 | 'Write join two Metadata to GCS.' >> beam.io.WriteToText(output_join_two_path, file_name_suffix=".json")
+    
+               
 output_offer_metadata_path = "gs://outfiles_parquet/offer_bank/offer_result/offer_metadata.json" 
 output_cdp_items_list_grouped_path = "gs://outfiles_parquet/offer_bank/offer_result/cdp_items_list_grouped.json" 
 output_cdp_items_list_deduplicated_path = "gs://outfiles_parquet/offer_bank/offer_result/cdp_items_list_deduplicated.json"
+output_join_one_path = "gs://outfiles_parquet/offer_bank/offer_result/join_one_metadata.json" 
+output_join_two_path = "gs://outfiles_parquet/offer_bank/offer_result/join_two_metadata.json" 
 
 # Function to fetch offer metadata 
 def write_broadreach_offers(jdbc_url, jdbc_user, jdbc_password):
