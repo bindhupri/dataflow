@@ -27,10 +27,39 @@ class GroupByAndCount(beam.DoFn):
         item_nbr, prod_ids = element
         yield {
             'itemId': item_nbr,
-            'ProductCount': len(set(prod_ids))
+            'ProductCount': len((prod_ids))
         }
 
-def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
+def coalesce_product_id(row):
+    row['productId'] = row['productId'] if row['productId'] is not None else row['PROD_ID']
+    return row
+
+def drop_redundant_columns(row):
+    row.pop('PROD_ID', None)
+    row.pop('ITEM_NBR', None)
+    row.pop('labels', None)
+    return row
+
+def add_product_item_mapping_status(row):
+    if row.get('ProductCount', 0) > 1:
+        row['productItemMappingStatus'] = '1-to-multiple'
+    elif row['productId'] is None:
+        row['productItemMappingStatus'] = 'missing'
+    else:
+        row['productItemMappingStatus'] = 'normal'
+    return row
+
+def replace_null_with_empty(row):
+    if row['productId'] is None:
+        row['productId'] = ''
+    return row
+
+def cast_columns(element):
+    element['exclusive_club_number'] = int(element['exclusive_club_number'])
+    element['item_number'] = int(element['item_number'])
+    return element
+
+def transform_and_write_offer_metadata(offer_metadata, p, pipeline_options):
     # Apply transformations
     transformed_data = (
         offer_metadata
@@ -44,7 +73,8 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
             'discountType': row['discount_type'],
             'discountValue': row['discount_value'],
             'applicableChannels': row['applicable_channel'],
-            'clubs': row['club_list']
+            'clubs': row['club_list'],
+            'item_number': row['item_number']
         })
         # Set default values
         | 'SetDefaultValues' >> beam.Map(lambda row: {
@@ -70,8 +100,7 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
             'savingsId': str(row['savingsId']),
             'startDate': str(row['startDate']),
             'endDate': str(row['endDate']),
-            'exclusive_club_number': int(row['exclusive_club_number']),  # Assuming exclusive_club_number is int
-            'item_number': int(row['exclusive_club_number'])  # Assuming item_number is int
+            'exclusive_club_number': int(row['exclusive_club_number']),  # Assuming exclusive_club_number is int 
         })
         # Set eventTag based on labels
         | 'SetEventTag' >> beam.Map(lambda row: {
@@ -91,7 +120,7 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
                 where t2.PROD_STATUS_CD = 'ACTIVE'"""
     
     cdp_items_list = (p 
-                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True, gcs_location = 'gs://outfiles_parquet/offer_bank/temp/',project=pipeline_options.view_as(GoogleCloudOptions).project)
+                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True, gcs_location = 'gs://cdp_bucket_check/output/offer_bank/temp/',project=pipeline_options.view_as(GoogleCloudOptions).project)
         )
 
     # Group by ITEM_NBR and compute distinct PROD_ID count
@@ -103,8 +132,10 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
             | 'Rename item_number' >> beam.Map(lambda row: {'item_number': row['itemId'], 'ProductCount': row['ProductCount']})
             | 'Key by itemId for cdp data' >> beam.Map(lambda row: (row['item_number'], row))
         )
+ 
 
     cdp_items_list_grouped_written = cdp_items_list_grouped | ' Write offer Metadata to GCS' >> beam.io.WriteToText(output_cdp_items_list_grouped_path, file_name_suffix=".json")
+    
     
     # Drop duplicates based on ITEM_NBR (already done by GroupByKey)
     cdp_items_list_deduplicated = (
@@ -114,7 +145,7 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
             | 'Extract Values' >> beam.Map(lambda x: {'PROD_ID': x[1][0], 'ITEM_NBR': x[1][1]})
             | 'Key by ITEM_NBR for cdp data' >> beam.Map(lambda row: (row['ITEM_NBR'], row))
         )
-    
+ 
     cdp_items_list_deduplicated_written = cdp_items_list_deduplicated | 'Write offer Metadata to GCS.' >> beam.io.WriteToText(output_cdp_items_list_deduplicated_path, file_name_suffix=".json")
     
     # join to fetch item-product mapping only for relevant items
@@ -126,6 +157,7 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
                 for clearance_item in x[1]['offers']
                 for cdp_item in x[1]['cdp']
                 if clearance_item['item_number'] == cdp_item['ITEM_NBR'] ])
+            | 'Key by item_number for all cdp data' >> beam.Map(lambda row: (row['item_number'], row))
         )
 
     join_one_written = transformed_offer_metadata1 | 'Write join Metadata to GCS.' >> beam.io.WriteToText(output_join_one_path, file_name_suffix=".json")
@@ -140,9 +172,89 @@ def transform_and_write_offer_metadata(offer_metadata,p,pipeline_options):
                 for grouped_item in x[1]['cdp_grouped'] 
                 if clearance_item['item_number'] == grouped_item['item_number'] ]) )  
     
+
     join_two_written = transformed_offer_metadata3 | 'Write join two Metadata to GCS.' >> beam.io.WriteToText(output_join_two_path, file_name_suffix=".json")
+    # Filter items with ProductCount > 1
+    multiple_product_mapping = (
+            transformed_offer_metadata3
+            | 'Filter Multiple Product Count' >> beam.Filter(lambda x: x['ProductCount'] > 1)
+        )
+
+    multiple_product_mapping_count = (
+            multiple_product_mapping
+            | 'Count Multiple Product Items' >> beam.combiners.Count.Globally()
+        )
+
+    multiple_product_mapping_count | 'Print Multiple Product Count' >> beam.Map(print)
+
+    # Apply coalesce operation to the joined PCollection
+    clearanced_items_metadata2 = (
+            transformed_offer_metadata3 
+            | 'Coalesce productId' >> beam.Map(coalesce_product_id) 
+        )    
     
-               
+    # Drop redundant columns
+    finalised_joined_offers_metadata = clearanced_items_metadata2 | 'Drop Redundant Columns' >> beam.Map(drop_redundant_columns)
+        
+    # Add productItemMappingStatus column
+    final_joined_metadata1 = finalised_joined_offers_metadata | 'Add productItemMappingStatus' >> beam.Map(add_product_item_mapping_status)
+
+    # Replace null values with empty string
+    final_joined_metadata2 = final_joined_metadata1 | 'Replace Null with Empty' >> beam.Map(replace_null_with_empty)
+    
+    final_joined_metadata4 = (
+        final_joined_metadata2
+        # Apply column renaming
+        | 'RenameColumnsagain' >> beam.Map(lambda row: {
+            'product_id': row['productId'],
+            'item_type': row['item_type'],
+            'exclusive_club_number': row['exclusive_club_number'],
+            'exclusive_club_startdate': row['exclusive_club_startdate'],
+            'exclusive_club_enddate': row['exclusive_club_enddate'],
+            'savingsId':row['savingsId'],
+            'savingsType':row['savingsType'],
+            'startDate':row['startDate'],
+            'endDate':row['endDate'],
+            'timeZone':row['timeZone'],
+            'discountType':row['discountType'],
+            'basePrice':row['basePrice'],
+            'discountValue':row['discountValue'],
+            'applicableChannels':row['applicableChannels'],
+            'clubs':row['clubs'],
+            'eventTag':row['eventTag']       
+            
+            
+        }) 
+    )
+    offer_metadata_grouped = (
+        final_joined_metadata4
+        | 'GroupByOffer' >> beam.Map(lambda x: ((
+            x['savingsId'], x['savingsType'], x['startDate'], x['endDate'], x['timeZone'], 
+            x['discountType'], x['basePrice'], x['discountValue'], x['applicableChannels'], 
+            x['clubs'], x['eventTag']
+        ), x))
+        | 'GroupByKey' >> beam.GroupByKey()
+        | 'AggregateOfferData' >> beam.Map(lambda x: {
+            'savingsId': x[0][0],
+            'savingsType': x[0][1],
+            'startDate': x[0][2],
+            'endDate': x[0][3],
+            'timeZone': x[0][4],
+            'discountType': x[0][5],
+            'basePrice': x[0][6],
+            'discountValue': x[0][7],
+            'applicableChannels': x[0][8],
+            'clubs': x[0][9],
+            'eventTag': x[0][10],
+            #'members': [item['membership_id'] for item in x[1]],
+            #'items': [{'itemId': item['item_number'], 'productId': item['product_id'], 'itemType': item['item_type'], 'productItemMappingStatus': item['productItemMappingStatus']} for item in x[1]],
+            #'clubOverrides': [{'clubNumber': item['clubNumber'], 'clubStartDate': item['clubStartDate'], 'clubEndDate': item['clubEndDate']} for item in x[1]]
+        })
+    )
+    
+    # Apply the transformations to each element of the PCollection
+    #offer_metadata_casted = offer_metadata_grouped | 'CastColumns' >> beam.Map(cast_columns)
+
 output_offer_metadata_path = "gs://outfiles_parquet/offer_bank/offer_result/offer_metadata.json" 
 output_cdp_items_list_grouped_path = "gs://outfiles_parquet/offer_bank/offer_result/cdp_items_list_grouped.json" 
 output_cdp_items_list_deduplicated_path = "gs://outfiles_parquet/offer_bank/offer_result/cdp_items_list_deduplicated.json"
@@ -195,7 +307,7 @@ class CustomPipelineOptions(PipelineOptions):
         parser.add_argument('--env', required=True, help='Environment')
         parser.add_argument('--project_id', required=True, help='GCP Project ID')
         parser.add_argument('--savings_ds_bucket', required=True, help='GCS Bucket for savings dataset')
- 
+
 def run(argv=None):
     pipeline_options = PipelineOptions(argv)
     custom_options = pipeline_options.view_as(CustomPipelineOptions)
@@ -204,23 +316,22 @@ def run(argv=None):
     savings_ds_bucket = custom_options.savings_ds_bucket
     google_cloud_options = pipeline_options.view_as(GoogleCloudOptions)
     google_cloud_options.project = project
- 
+
     try:
         jdbc_url = access_secret_version(project, f'{env}PostgresJdbcUrl', 'latest')
         jdbc_user = access_secret_version(project, f'{env}PostgresRWUser', 'latest')
         jdbc_password = access_secret_version(project, f'{env}PostgresRWPassword', 'latest')
     except Exception as error:
         raise Exception(f"Error while fetching secrets from secret manager: {error}")
-    
 
     with beam.Pipeline(options=pipeline_options) as p:
         # Fetch offer metadata
         offer_metadata = (
             p
-            | 'broadreachoffersMetadata' >> write_broadreach_offers(jdbc_url, jdbc_user, jdbc_password) 
+            | 'broadreachoffersMetadata' >> write_broadreach_offers(jdbc_url, jdbc_user, jdbc_password)
         )
         # Apply transformations and write to destination
-        transform_and_write_offer_metadata(offer_metadata,p,pipeline_options)
+        transform_and_write_offer_metadata(offer_metadata, p, pipeline_options)
 
 if __name__ == '__main__':
     run()
