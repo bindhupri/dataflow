@@ -120,7 +120,7 @@ def transform_and_write_offer_metadata(offer_metadata, p, pipeline_options):
                 where t2.PROD_STATUS_CD = 'ACTIVE'"""
     
     cdp_items_list = (p 
-                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True, gcs_location = 'gs://cdp_bucket_check/output/offer_bank/temp/',project=pipeline_options.view_as(GoogleCloudOptions).project)
+                          | 'Read CDP Items' >> beam.io.ReadFromBigQuery(query=query_cdp_items, use_standard_sql=True, gcs_location = 'gs://outfiles_parquet/offer_bank/temp/',project=pipeline_options.view_as(GoogleCloudOptions).project)
         )
 
     # Group by ITEM_NBR and compute distinct PROD_ID count
@@ -251,7 +251,7 @@ def transform_and_write_offer_metadata(offer_metadata, p, pipeline_options):
             #'clubOverrides': [{'clubNumber': item['clubNumber'], 'clubStartDate': item['clubStartDate'], 'clubEndDate': item['clubEndDate']} for item in x[1]]
         })
     )
-    
+    final_join_written = offer_metadata_grouped | 'Write coalesce to GCS..' >> beam.io.WriteToText(output_final_join_path, file_name_suffix=".json")
     # Apply the transformations to each element of the PCollection
     #offer_metadata_casted = offer_metadata_grouped | 'CastColumns' >> beam.Map(cast_columns)
 
@@ -260,6 +260,7 @@ output_cdp_items_list_grouped_path = "gs://outfiles_parquet/offer_bank/offer_res
 output_cdp_items_list_deduplicated_path = "gs://outfiles_parquet/offer_bank/offer_result/cdp_items_list_deduplicated.json"
 output_join_one_path = "gs://outfiles_parquet/offer_bank/offer_result/join_one_metadata.json" 
 output_join_two_path = "gs://outfiles_parquet/offer_bank/offer_result/join_two_metadata.json" 
+output_final_join_path = "gs://outfiles_parquet/offer_bank/offer_result/final_metadata.json"
 
 # Function to fetch offer metadata 
 def write_broadreach_offers(jdbc_url, jdbc_user, jdbc_password):
@@ -309,7 +310,23 @@ class CustomPipelineOptions(PipelineOptions):
         parser.add_argument('--savings_ds_bucket', required=True, help='GCS Bucket for savings dataset')
 
 def run(argv=None):
-    pipeline_options = PipelineOptions(argv)
+    pipeline_options= PipelineOptions(
+        runner='DataflowRunner',
+        #temp_location='gs://xmltelecom/tmp/',
+        #region='us-central1',
+        #staging_location='gs://xmltelecom/staging/',
+        num_workers=10, # 
+        worker_machine_type='n2-highmem-8',
+        worker_disk_type='pd-ssd',
+        worker_disk_size_gb=100,
+        machine_type='n2-highmem-8',
+        #disk_size_gb=500,
+        #disk_type='pd-ssd',
+        #experiments=['use_runner_v2'],
+        #template_location='gs://outfiles_parquet/offer_bank/result/template'
+        )
+
+    #pipeline_options = PipelineOptions(argv)
     custom_options = pipeline_options.view_as(CustomPipelineOptions)
     project = custom_options.project_id
     env = custom_options.env
