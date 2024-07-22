@@ -190,18 +190,18 @@ def format_with_commas(elements):
 # Define the pipeline options
 pipeline_options = PipelineOptions()
 google_cloud_options = pipeline_options.view_as(GoogleCloudOptions)
-google_cloud_options.project = 'playground-s-11-27ec8fa8'
+google_cloud_options.project = 'dev-sams-data-generator'
 google_cloud_options.job_name = 'parquet-to-json'
-google_cloud_options.staging_location = 'gs://shuvabuc007/staging'
-google_cloud_options.temp_location = 'gs://shuvabuc007/temp'
+google_cloud_options.staging_location = 'gs://poc-sample-parquet/staging'
+google_cloud_options.temp_location = 'gs://poc-sample-parquet/temp'
 pipeline_options.view_as(StandardOptions).runner = 'DataflowRunner'
 pipeline_options.view_as(GoogleCloudOptions).region = 'us-central1'
 
 # Path to the input Parquet file in GCS
-input_parquet_path = 'gs://shuvabuc007/input/part-00000-c7585b4f-7e43-4685-ad20-ebdb71ca97a6-c000.snappy.parquet'
+input_parquet_path = 'gs://poc-sample-parquet/rye_reco_2024-06-22_part-000000000000.parquet'
 
 # Path to the output JSON file in GCS
-output_json_path = 'gs://shuvabuc007/output/output.json'
+output_json_path = 'gs://poc-sample-parquet/output.json'
 
 # Create the pipeline
 with beam.Pipeline(options=pipeline_options) as p:
