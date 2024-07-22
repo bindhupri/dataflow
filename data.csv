@@ -81,7 +81,7 @@ def format_with_commas(elements):
 pipeline_options = PipelineOptions()
 
 # Path to the input Parquet file
-input_parquet_path = '//allnewproject/beam/output/part-00000-c7585b4f-7e43-4685-ad20-ebdb71ca97a6-c000.snappy.parquet'
+input_parquet_path = '/home/jovyan/bindhu/harmony/part-00000-c7585b4f-7e43-4685-ad20-ebdb71ca97a6-c000.snappy.parquet'
 
 # Create the pipeline
 with beam.Pipeline(options=pipeline_options) as p:
