@@ -1,0 +1,59 @@
+import apache_beam as beam
+from apache_beam.options.pipeline_options import PipelineOptions, GoogleCloudOptions, StandardOptions, WorkerOptions
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+class AddCid(beam.DoFn):
+    def process(self, element):
+        import random 
+        element['cid'] = random.randint(1000, 9999)
+        yield element
+
+def get_parquet_schema(parquet_file_path):
+    parquet_file = pq.ParquetFile(parquet_file_path)
+    schema = parquet_file.schema
+    return schema
+
+def run(input_path, output_path):
+    options = PipelineOptions()
+
+    # Google Cloud options
+    google_cloud_options = options.view_as(GoogleCloudOptions)
+    google_cloud_options.project = 'playground-s-11-37e6924e'
+    google_cloud_options.job_name = 'add-cid-to-parquet'
+    google_cloud_options.temp_location = 'gs://shuvabuc005/temp'
+    google_cloud_options.staging_location = 'gs://shuvabuc005/staging'
+    google_cloud_options.region = 'us-west1'
+
+    # Standard options
+    options.view_as(StandardOptions).runner = 'DataflowRunner'
+
+    # Worker options
+    worker_options = options.view_as(WorkerOptions)
+    worker_options.num_workers = 5
+    worker_options.max_num_workers = 10
+    worker_options.machine_type = 'n1-standard-1'
+
+    with beam.Pipeline(options=options) as p:
+        (
+            p
+            | 'Read Parquet' >> beam.io.ReadFromParquet(input_path)
+            | 'Add cid column' >> beam.ParDo(AddCid())
+            | 'Write to Parquet' >> beam.io.WriteToParquet(
+                output_path,
+                schema=pa.schema([
+                    ('membership_nbr', pa.int64()),
+                    ('prod_id', pa.string()),
+                    ('cid', pa.int64())
+                ])
+            )
+        )
+
+if _name_ == '_main_':
+    input_path = 'gs://shuvabuc005/input/part-00000-c7585b4f-7e43-4685-ad20-ebdb71ca97a6-c000.snappy.parquet'
+    output_path = 'gs://shuvabuc005/output/output.parquet'
+    try:
+        run(input_path, output_path)
+    except Exception as e:
+        print("Pipeline failed: %s" % e)
+        raise
